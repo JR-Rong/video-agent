@@ -1,0 +1,26 @@
+platforms:
+  - key: douyin
+    name: 抖音
+    enabled: true
+    uploader: douyin_openapi
+    queue_subdir: douyin
+  - key: kuaishou
+    name: 快手
+    enabled: true
+    uploader: kuaishou_openapi
+    queue_subdir: kuaishou
+  - key: bilibili
+    name: B站
+    enabled: true
+    uploader: bilibili_openapi
+    queue_subdir: bilibili
+  - key: xiaohongshu
+    name: 小红书
+    enabled: true
+    uploader: xiaohongshu_openapi
+    queue_subdir: xiaohongshu
+  - key: shipinhao
+    name: 视频号
+    enabled: true
+    uploader: shipinhao_openapi
+    queue_subdir: shipinhao

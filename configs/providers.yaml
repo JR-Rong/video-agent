@@ -1,0 +1,14 @@
+openai:
+  base_url: ""
+  text_model: "gpt-4o-mini"
+  image_model: "gpt-image-1"
+  # 你若要启用 videos 或 mixed 中的 video 镜头，请填视频模型（示例名仅占位）
+  video_model: ""
+
+tts:
+  provider: "edge_tts"
+  voice: "zh-CN-XiaoxiaoNeural"
+
+render:
+  ffmpeg_bin: "ffmpeg"
+  preset: "vertical_1080x1920"

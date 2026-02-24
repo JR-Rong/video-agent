@@ -1,0 +1,20 @@
+# 允许的内容类别（你可随时增删）
+# 注意：仍会被 safety policy 禁止“新闻/政治/实事”
+allowlist:
+  - emotion
+  - history
+  - life
+  - fantasy
+  - education
+  - story
+  - parenting
+  - workplace
+  - relationship
+  - self_growth
+  - healing
+  - mystery
+  - sci_fi
+  - romance
+  - campus
+  - comedy
+  - suspense

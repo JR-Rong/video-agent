@@ -1,0 +1,18 @@
+presets:
+  vertical_1080x1920:
+    width: 1080
+    height: 1920
+    fps: 30
+    video_codec: "libx264"
+    audio_codec: "aac"
+    crf: 20
+    preset: "veryfast"
+
+  vertical_720x1280_lowcost:
+    width: 720
+    height: 1280
+    fps: 24
+    video_codec: "libx264"
+    audio_codec: "aac"
+    crf: 24
+    preset: "veryfast"

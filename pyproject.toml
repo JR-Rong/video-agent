@@ -1,0 +1,19 @@
+[project]
+name = "shortvideo-agent"
+version = "0.2.0"
+description = "Short video generation agent with memory, safety policy, storyboard and image/video/mixed rendering. Exports to folders for manual upload."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "pydantic>=2.6",
+  "python-dotenv>=1.0",
+  "rich>=13.7",
+  "typer>=0.12",
+  "openai>=1.40.0",
+  "edge-tts>=6.1.9",
+  "tenacity>=8.2",
+  "PyYAML>=6.0.1",
+]
+
+[project.scripts]
+shortvideo-agent = "shortvideo_agent.main:app"

@@ -1,0 +1,12 @@
+# 生成完的视频会复制/导出到 export_root 下
+export_root: "./data/export"
+
+# 按类别路由（你可改成不同账号对应的目录）
+routes:
+  default: "general"
+
+  emotion: "acct_emotion"
+  history: "acct_history"
+  life: "acct_life"
+  fantasy: "acct_fantasy"
+  education: "acct_edu"
