@@ -1,0 +1,37 @@
+# =========================
+# shortvideo-agent 参数示例（复制为 .args 生效）
+# 写法：--参数=值
+# 说明：未填写的参数表示不传入，使用默认值或自动推断
+# =========================
+
+# 内容类别（必须在 configs/categories.yaml 的 allowlist 中）
+--category=life
+
+# 系列ID（用于续写/分集；同一 series 下每次会自动 episode+1）
+--series=life-long-001
+
+# 主题提示词（必须原创；严禁新闻/政治/时事/热点）
+--prompt=一个发生在城市角落的温暖小故事
+
+# 总时长（秒，建议 <= 300；长视频建议 120~300）
+--total-seconds=30
+
+# 镜头模式：images=全图片动效；videos=全视频；mixed=按脚本自动（推荐）
+--media-mode=mixed
+
+# 素材库复用阈值（0-100，越高越严格；建议 70~85）
+--reuse-min-score=78
+
+# 只生成脚本不出视频（true/false）
+# --dry-run=true
+
+# 输出结果JSON到文件（便于外部系统读取）
+# --out-json=./result.json
+
+# scenes 镜头数量：
+# - 不写：自动估算（推荐）
+# - 写数字：强制镜头数（例如 12）
+# --scenes=12
+
+# 系列视频总览文件，和prompt互斥：
+# --series-file=./series/history_qin.yaml

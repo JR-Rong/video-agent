@@ -1,0 +1,30 @@
+default:
+  realism: true
+  banned_modern_objects:
+    - 自行车
+    - 汽车
+    - 手机
+    - 互联网
+    - 电灯
+    - 西装
+    - 牛仔裤
+    - 高楼大厦
+  banned_modern_words:
+    - APP
+    - WiFi
+    - 二维码
+    - 直播
+    - 网红
+
+eras:
+  "战国-秦国":
+    realism: true
+    allowed_tech: ["青铜", "铁器", "战车", "简牍", "竹简", "戈", "剑", "弩"]
+    clothing: ["深衣", "甲胄", "布衣"]
+    architecture: ["夯土城墙", "木构", "宫殿台基"]
+    banned_modern_objects: ["自行车", "汽车", "手机", "西装", "电灯"]
+  "唐朝":
+    realism: true
+    clothing: ["襦裙", "圆领袍", "幞头", "胡服（需合理）"]
+    architecture: ["坊市", "朱雀大街", "木构建筑"]
+    banned_modern_objects: ["自行车", "汽车", "手机", "西装", "高楼玻璃幕墙"]

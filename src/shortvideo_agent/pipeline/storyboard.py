@@ -1,14 +1,11 @@
 from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import Any
-
 
 @dataclass(frozen=True)
 class Storyboard:
     outline: dict[str, Any]
     script: dict[str, Any]
-
 
 OUTLINE_SCHEMA_HINT = """{
   "title": "string",
@@ -27,7 +24,11 @@ SCRIPT_SCHEMA_HINT = """{
   "series": "string",
   "episode": 1,
   "title": "string",
-  "total_seconds": 30,
+  "total_seconds": 300,
+  "hook_opening": {
+    "spoken_hook_5_10s": "string",
+    "on_screen_hook": "string"
+  },
   "style": {
     "visual": "string",
     "music": "string"
@@ -35,8 +36,10 @@ SCRIPT_SCHEMA_HINT = """{
   "scenes": [
     {
       "id": 1,
-      "seconds": 5,
-      "media_type": "image",
+      "seconds": 12,
+      "importance": "key",
+      "orientation": "portrait",
+      "media_type": "video",
       "narration": "string",
       "on_screen_text": "string",
       "image_prompt": "string",

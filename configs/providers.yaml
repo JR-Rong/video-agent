@@ -1,14 +1,44 @@
-openai:
-  base_url: ""
-  text_model: "gpt-4o-mini"
-  image_model: "gpt-image-1"
-  # 你若要启用 videos 或 mixed 中的 video 镜头，请填视频模型（示例名仅占位）
-  video_model: ""
+llm:
+  providers: ["deepseek", "qwen"]
 
-tts:
-  provider: "edge_tts"
-  voice: "zh-CN-XiaoxiaoNeural"
+deepseek:
+  base_url: "https://api.deepseek.com"
+  model: "deepseek-chat"
 
-render:
-  ffmpeg_bin: "ffmpeg"
-  preset: "vertical_1080x1920"
+qwen:
+  base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+  model: "qwen-plus"
+
+image_generation:
+  provider: "kling"          
+  default_size: "1k"
+  default_aspect_ratio: "9:16"
+  key_resolution: "2k"
+  model_name: "kling-v2-1"
+  watermark_enabled: false
+  allow_openai_fallback: false  
+
+video_generation:
+  provider: "kling"
+  default:
+    width: 720
+    height: 1280
+    fps: 24
+  key_shot:
+    width: 1080
+    height: 1920
+    fps: 24
+
+kling:
+  base_url: "https://api-beijing.klingai.com"
+  model_name: "kling-v2-6"
+  mode: "std"
+  sound: "off"
+  watermark_enabled: false
+  timeout_sec: 120
+  poll_interval_sec: 2.0
+  poll_timeout_sec: 600
+
+kling_costs:
+  lookback_days: 30
+  resource_pack_name: ""

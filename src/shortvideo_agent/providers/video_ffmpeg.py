@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 from typing import Sequence
@@ -22,13 +23,9 @@ def image_to_motion_clip(
     fps: int,
     zoom: float = 1.10,
 ) -> str:
-    """
-    Ken Burns（平移缩放）让静态图“动起来”
-    """
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-
-    # zoompan: d=frames, z=zoom, x/y做轻微移动
     frames = max(1, seconds * fps)
+
     vf = (
         f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
         f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
@@ -95,15 +92,26 @@ def normalize_video_clip(
     return out_path
 
 
-def concat_clips(
-    *,
-    ffmpeg_bin: str,
-    clip_paths: list[str],
-    out_path: str,
-) -> str:
+def _ffmpeg_concat_quote(path: str) -> str:
+    # ffmpeg concat list single-quote escaping
+    return path.replace("'", "'\\''")
+
+
+def concat_clips(*, ffmpeg_bin: str, clip_paths: list[str], out_path: str) -> str:
+    """
+    Use concat demuxer. IMPORTANT:
+    - write ABSOLUTE paths to avoid ffmpeg resolving relative paths against concat file directory.
+    """
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     list_file = str(Path(out_path).with_suffix(".concat.txt"))
-    Path(list_file).write_text("\n".join([f"file '{p.replace(\"'\", \"'\\\\''\")}'" for p in clip_paths]), encoding="utf-8")
+
+    lines = []
+    for p in clip_paths:
+        ap = os.path.abspath(p)
+        qp = _ffmpeg_concat_quote(ap)
+        lines.append(f"file '{qp}'")
+
+    Path(list_file).write_text("\n".join(lines), encoding="utf-8")
 
     run(
         [
@@ -124,13 +132,7 @@ def concat_clips(
     return out_path
 
 
-def mux_audio(
-    *,
-    ffmpeg_bin: str,
-    video_path: str,
-    audio_path: str,
-    out_path: str,
-) -> str:
+def mux_audio(*, ffmpeg_bin: str, video_path: str, audio_path: str, out_path: str) -> str:
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     run(
         [

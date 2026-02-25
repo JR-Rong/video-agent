@@ -95,3 +95,27 @@ class MemoryStore:
         with self._connect() as conn:
             rows = conn.execute("SELECT DISTINCT series FROM generations ORDER BY series").fetchall()
             return [r["series"] for r in rows]
+
+    def list_records_by_series(self, series: str, limit: int = 20) -> list[GenerationRecord]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM generations WHERE series=? ORDER BY id DESC LIMIT ?",
+                (series, int(limit)),
+            ).fetchall()
+
+        out: list[GenerationRecord] = []
+        for row in rows:
+            out.append(
+                GenerationRecord(
+                    id=row["id"],
+                    series=row["series"],
+                    category=row["category"],
+                    user_prompt=row["user_prompt"],
+                    created_at=row["created_at"],
+                    outline=json.loads(row["outline_json"]),
+                    script=json.loads(row["script_json"]),
+                    assets=json.loads(row["assets_json"]),
+                    final_video_path=row["final_video_path"],
+                )
+            )
+        return out

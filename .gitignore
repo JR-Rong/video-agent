@@ -1,0 +1,11 @@
+__pycache__/
+src/shortvideo_agent.egg-info/
+dist/
+.env
+.args
+*.sqlite3
+data/output/*
+*.png
+*.txt
+*.mp3
+*.mp4

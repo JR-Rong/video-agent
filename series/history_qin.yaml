@@ -1,0 +1,18 @@
+series: history-long-001
+category: history
+overview: |
+  这是一个关于秦国崛起的系列短视频，强调历史逻辑与时代背景，叙事风格克制、紧凑但有悬念。需要确保讲解的是史实，每一集结尾要有启示或启发。
+rules:
+  era: "战国-秦国"
+  realism: true
+  history_mode: factual
+  # classical_text: | # 古文引用（选填）
+  #   孝公既用卫鞅，鞅欲变法，恐天下议己……
+episodes:
+  - prompt: "商鞅初到秦国：他看到的第一个问题是什么？"
+    total_seconds: 15
+  #   media_mode: mixed
+  # - prompt: "变法的第一刀：谁先反对？为什么？"
+  #   total_seconds: 180
+  # - prompt: "法令落地：普通人怎样被改变命运？"
+  #   total_seconds: 240
