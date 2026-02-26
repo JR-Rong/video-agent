@@ -17,10 +17,12 @@ from .utils.files import ensure_dir
 from .utils.text import clamp_int
 from .utils.args_file import find_args_file, parse_args_file, coerce_types
 from .utils.series_file import load_series_file
+from .utils.trace_stats import load_jsonl, summarize_trace
 
 from .providers.llm_router import build_llm
 from .providers.images_router import build_images
 from .providers.video_router import build_video_generator
+from .providers.external_media.router import build_external_media
 from .pipeline.orchestrator import Orchestrator
 
 app = typer.Typer(add_completion=False)
@@ -101,6 +103,23 @@ def _apply_args_file_defaults(project_dir: str, cli: dict[str, Any]) -> dict[str
 
 
 @app.command()
+def stats(
+    trace: str = typer.Option(..., help="trace.jsonl path, e.g. data/outputs/xxx/ep_1/trace.jsonl"),
+) -> None:
+    """
+    从 trace.jsonl 汇总：
+    - LLM token usage（优先 provider usage，缺失则估算）
+    - 外搜使用的图片/视频数、候选数
+    - 生成的图片/视频数
+    - era_guard 尝试/拦截数
+    """
+    setup_logging()
+    events = load_jsonl(trace)
+    out = summarize_trace(events)
+    typer.echo(json.dumps(out, ensure_ascii=False, indent=2))
+
+
+@app.command()
 def run(
     category: Optional[str] = typer.Option(None, help="内容类别（不传则尝试从 .args 读取）"),
     series: Optional[str] = typer.Option(None, help="系列ID（不传则尝试从 .args 读取）"),
@@ -128,7 +147,6 @@ def run(
         "dry-run": dry_run,
         "out-json": out_json,
     }
-
     merged = _apply_args_file_defaults(os.getcwd(), cli)
 
     category_v = merged.get("category")
@@ -150,6 +168,7 @@ def run(
     llm = build_llm(settings=settings)
     images = build_images(settings=settings)
     video_generator = build_video_generator(settings=settings)
+    external_media = build_external_media(settings=settings)
 
     kling_costs = _maybe_show_kling_costs(video_generator, settings.providers_config_path)
 
@@ -160,13 +179,13 @@ def run(
         images=images,
         video_generator=video_generator,
         library=library,
+        external_media=external_media,
     )
 
     # ---------- Batch mode ----------
     if series_file_v:
         spec = load_series_file(series_file_v)
 
-        # series/category from file override CLI
         category_v = spec.category
         series_v = spec.series
         series_overview = spec.overview
@@ -207,6 +226,7 @@ def run(
         out = {"mode": "batch", "series_file": series_file_v, "results": results}
         if kling_costs is not None:
             out["kling_costs"] = kling_costs
+
         typer.echo(json.dumps(out, ensure_ascii=False, indent=2))
 
         if merged.get("out_json"):

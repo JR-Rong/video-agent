@@ -6,6 +6,8 @@ from typing import Any, Optional
 import requests
 from tenacity import retry, stop_after_attempt, wait_exponential
 
+from ..utils.token_estimator import estimate_chat_tokens, TokenUsage
+
 
 def _must_be_pure_json_object(text: str) -> dict[str, Any]:
     t = (text or "").strip()
@@ -22,6 +24,10 @@ class OpenAICompatChatLLM:
     """
     OpenAI-compatible /chat/completions (DeepSeek, DashScope compatible-mode).
     Strict mode: MUST return pure JSON only.
+
+    Enhancement:
+    - tries to read provider usage from response. If missing, estimates locally.
+    - attaches _usage into returned dict (not sent back to model).
     """
 
     def __init__(self, *, base_url: str, api_key: str, model: str, timeout_sec: int = 120) -> None:
@@ -39,7 +45,6 @@ class OpenAICompatChatLLM:
     def json_generate(self, *, system: str, user: str, schema_hint: str) -> dict[str, Any]:
         url = f"{self.base_url}/chat/completions"
 
-        # 强约束：再次在 user 末尾加入“协议”
         strict_suffix = (
             "\n\n【输出协议-严格】\n"
             "你必须只输出一个JSON对象，要求：\n"
@@ -50,19 +55,15 @@ class OpenAICompatChatLLM:
             "再次强调：只输出JSON。\n"
         )
 
+        final_user = user + "\n\nJSON结构提示:\n" + schema_hint + strict_suffix
+
         payload = {
             "model": self.model,
             "messages": [
                 {"role": "system", "content": system},
-                {
-                    "role": "user",
-                    "content": user
-                    + "\n\nJSON结构提示:\n"
-                    + schema_hint
-                    + strict_suffix,
-                },
+                {"role": "user", "content": final_user},
             ],
-            "temperature": 0.4,  # 降低随机性，提高结构稳定性
+            "temperature": 0.4,
         }
 
         r = requests.post(url, headers=self._headers(), json=payload, timeout=self.timeout)
@@ -76,8 +77,18 @@ class OpenAICompatChatLLM:
 
         obj = _must_be_pure_json_object(content)
 
-        # 如果模型返回了 FORMAT_ERROR，也算失败（用于触发重试/切换，并记录日志）
         if isinstance(obj, dict) and obj.get("error") == "FORMAT_ERROR":
             raise ValueError("LLM returned FORMAT_ERROR JSON sentinel.")
+
+        # attach usage
+        usage = data.get("usage")
+        if isinstance(usage, dict) and any(k in usage for k in ("prompt_tokens", "completion_tokens", "total_tokens")):
+            pt = int(usage.get("prompt_tokens") or 0)
+            ct = int(usage.get("completion_tokens") or 0)
+            tt = int(usage.get("total_tokens") or (pt + ct))
+            obj["_usage"] = {"prompt_tokens": pt, "completion_tokens": ct, "total_tokens": tt, "mode": "provider"}
+        else:
+            est: TokenUsage = estimate_chat_tokens(system=system, user=final_user, completion=content, model=self.model)
+            obj["_usage"] = {"prompt_tokens": est.prompt_tokens, "completion_tokens": est.completion_tokens, "total_tokens": est.total_tokens, "mode": est.mode}
 
         return obj

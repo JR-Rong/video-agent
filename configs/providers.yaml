@@ -10,13 +10,13 @@ qwen:
   model: "qwen-plus"
 
 image_generation:
-  provider: "kling"          
+  provider: "kling"
   default_size: "1k"
   default_aspect_ratio: "9:16"
   key_resolution: "2k"
   model_name: "kling-v2-1"
   watermark_enabled: false
-  allow_openai_fallback: false  
+  allow_openai_fallback: false
 
 video_generation:
   provider: "kling"
@@ -42,3 +42,65 @@ kling:
 kling_costs:
   lookback_days: 30
   resource_pack_name: ""
+
+external_search:
+  enabled: true
+  providers: ["pexels", "pixabay", "archive"]
+  per_query: 8
+  min_duration_sec: 3
+  max_duration_sec: 20
+  trim_strategy: "random"
+  download_cache: true
+
+  strict_mode: true
+  min_match_score: 85
+  min_required_terms: 2
+  banned_terms:
+    - motorcycle
+    - motorbike
+    - scooter
+    - e-bike
+    - ebike
+    - electric bike
+    - car
+    - bus
+    - subway
+    - neon
+    - skyscraper
+    - suit
+    - street
+    - modern
+    - cosplay
+    - roman
+    - viking
+    - samurai
+    - knight
+    - gun
+    - rifle
+
+  era_guard:
+    enabled: true
+    provider: "qwen_compat"      # qwen_compat | openai_compat | off
+    fallback_provider: "openai_compat"
+
+    # --- Qwen (DashScope compatible-mode vision) ---
+    qwen_base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    qwen_model: "qwen-vl-plus"   # 你可改成你账号可用的 VL 模型
+    timeout_sec: 60
+
+    # --- OpenAI fallback (only if qwen fails / not configured) ---
+    openai_base_url: ""          # 可空：用 OPENAI_BASE_URL
+    openai_model: "gpt-4o-mini"  # 需要支持图片输入
+    # openai key 从 OPENAI_API_KEY 取
+
+    allowed_people_hint: ""      # 由 era_profile 来填也可以；留空也行
+    hard_block_objects:
+      - "electric scooter"
+      - "motorcycle"
+      - "car"
+      - "modern street"
+      - "neon sign"
+      - "smartphone"
+      - "modern clothing"
+
+  reuse_cooldown_scenes: 2

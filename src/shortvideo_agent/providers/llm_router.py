@@ -13,22 +13,60 @@ class LLMRouter:
     def __init__(self, chain: list[tuple[str, Any]]) -> None:
         self.chain = chain  # [(name, llm_instance)]
 
-    def json_generate(self, *, system: str, user: str, schema_hint: str, tracer: Tracer | None = None, step: str = "") -> dict[str, Any]:
+    def json_generate(
+        self,
+        *,
+        system: str,
+        user: str,
+        schema_hint: str,
+        tracer: Tracer | None = None,
+        step: str = "",
+    ) -> dict[str, Any]:
         last_err: Exception | None = None
         for name, llm in self.chain:
             t0 = time.time()
             if tracer:
-                tracer.emit("llm_try", step=step, provider=name, model=getattr(llm, "model", None), base_url=getattr(llm, "base_url", None))
+                tracer.emit(
+                    "llm_try",
+                    step=step,
+                    provider=name,
+                    model=getattr(llm, "model", None),
+                    base_url=getattr(llm, "base_url", None),
+                )
             try:
                 out = llm.json_generate(system=system, user=user, schema_hint=schema_hint)
+                elapsed = int((time.time() - t0) * 1000)
                 if tracer:
-                    tracer.emit("llm_ok", step=step, provider=name, model=getattr(llm, "model", None), elapsed_ms=int((time.time()-t0)*1000))
+                    tracer.emit("llm_ok", step=step, provider=name, model=getattr(llm, "model", None), elapsed_ms=elapsed)
+
+                    usage = out.get("_usage") if isinstance(out, dict) else None
+                    if isinstance(usage, dict):
+                        tracer.emit(
+                            "llm_usage",
+                            step=step,
+                            provider=name,
+                            model=getattr(llm, "model", None),
+                            prompt_tokens=int(usage.get("prompt_tokens") or 0),
+                            completion_tokens=int(usage.get("completion_tokens") or 0),
+                            total_tokens=int(usage.get("total_tokens") or 0),
+                            mode=str(usage.get("mode") or "unknown"),
+                        )
+
+                # do not leak internal field to downstream prompts if you don't want:
+                # but keeping it in final result is useful for cost accounting.
                 return out
             except Exception as e:
                 last_err = e
                 if tracer:
-                    tracer.emit("llm_fail", step=step, provider=name, model=getattr(llm, "model", None),
-                                elapsed_ms=int((time.time()-t0)*1000), error=str(e), error_type=type(e).__name__)
+                    tracer.emit(
+                        "llm_fail",
+                        step=step,
+                        provider=name,
+                        model=getattr(llm, "model", None),
+                        elapsed_ms=int((time.time() - t0) * 1000),
+                        error=str(e),
+                        error_type=type(e).__name__,
+                    )
                 continue
         raise RuntimeError(f"All LLM providers failed. last_error={last_err}") from last_err
 

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
-import json
 from typing import Any
 
 from ..config import Settings
@@ -23,6 +23,32 @@ from .storyboard import OUTLINE_SCHEMA_HINT, SCRIPT_SCHEMA_HINT
 
 log = logging.getLogger(__name__)
 
+SEARCH_KW_SCHEMA = """{
+  "keywords_en": "string"
+}"""
+
+ERA_PROFILE_SCHEMA = """{
+  "setting": {
+    "region": "string",
+    "period": "string",
+    "era": "string",
+    "culture_style": "string",
+    "genre": "realism|fantasy|sci_fi"
+  },
+  "search_keywords_en": {
+    "required_terms": ["string"],
+    "optional_terms": ["string"],
+    "avoid_terms": ["string"]
+  },
+  "visual_rules": {
+    "allowed_people_hint": "string",
+    "banned_objects": ["string"],
+    "banned_styles": ["string"],
+    "notes": "string"
+  },
+  "confidence": 0.0
+}"""
+
 
 class Orchestrator:
     def __init__(
@@ -34,6 +60,7 @@ class Orchestrator:
         images: Any,
         video_generator: Any | None,
         library: MediaLibrary,
+        external_media: Any | None,
     ) -> None:
         self.settings = settings
         self.memory = memory
@@ -41,19 +68,23 @@ class Orchestrator:
         self.images = images
         self.video_generator = video_generator
         self.library = library
+        self.external_media = external_media
 
         self.allow_categories = load_category_allowlist(settings.categories_config_path)
 
+        # prompts
         self.system_prompt = load_text(os.path.join(settings.prompts_dir, "system.md"))
         self.outline_user_tpl = load_text(os.path.join(settings.prompts_dir, "outline_user.md"))
         self.script_user_tpl = load_text(os.path.join(settings.prompts_dir, "script_user.md"))
 
         self.safety_judge_prompt_path = os.path.join(settings.prompts_dir, "safety_judge.md")
 
-        # era/history prompts
         self.era_constraints_tpl = load_text(os.path.join(settings.prompts_dir, "era_constraints.md"))
         self.history_factual_md = load_text(os.path.join(settings.prompts_dir, "history_factual.md"))
         self.history_classical_tpl = load_text(os.path.join(settings.prompts_dir, "history_classical_translation.md"))
+
+        # new: era profile extraction
+        self.era_profile_tpl = load_text(os.path.join(settings.prompts_dir, "era_profile.md"))
 
     def _safety_check_with_judge(self, *, stage: str, text: str, tracer: Tracer) -> None:
         if not self.settings.strict_safety:
@@ -83,25 +114,83 @@ class Orchestrator:
                 raise ValueError(f"{stage} blocked: {decision.get('reason')}")
 
     def _build_era_constraints_text(self, *, category: str, rules: dict[str, Any]) -> str:
-        era = str(rules.get("era") or "").strip() or "未指定"
+        era = str(rules.get("era") or rules.get("period") or "").strip() or "未指定"
         genre = str(rules.get("genre") or ("realism" if category == "history" else "realism")).strip()
         extra = str(rules.get("extra") or "").strip()
+        region = str(rules.get("region") or "").strip()
+        period = str(rules.get("period") or "").strip()
+        if region or period:
+            extra2 = f"地域：{region or '未指定'}；时期：{period or '未指定'}"
+            extra = (extra2 + ("\n" + extra if extra else "")).strip()
         return render_template(self.era_constraints_tpl, {"era": era, "genre": genre, "extra": extra})
 
     def _build_history_constraints_text(self, *, category: str, rules: dict[str, Any]) -> str:
         if category != "history":
             return ""
         mode = str(rules.get("history_mode") or "factual").strip()
-
         if mode == "classical_translation":
             classical_text = str(rules.get("classical_text") or "").strip()
             if not classical_text:
-                # 未提供古文则退回史实叙述
                 return self.history_factual_md + "\n（提示：未提供 classical_text，已退回史实叙述模式）"
             return render_template(self.history_classical_tpl, {"classical_text": classical_text})
-
-        # 默认：史实叙述（可合理补全）
         return self.history_factual_md
+
+    def _translate_search_constraints(
+        self,
+        *,
+        category: str,
+        rules: dict[str, Any],
+        tracer: Tracer,
+    ) -> str:
+        region = str(rules.get("region") or "").strip()
+        period = str(rules.get("period") or "").strip()
+        era = str(rules.get("era") or "").strip()
+        genre = str(rules.get("genre") or "").strip() or ("realism" if category == "history" else "realism")
+
+        if not (region or period or era):
+            return ""
+
+        user = (
+            "请把以下“地域+时期/时代”转换为适合外网素材平台检索的英文关键词（短语即可）。\n"
+            "要求：\n"
+            "1) 输出只包含一个JSON对象 {\"keywords_en\":\"...\"}\n"
+            "2) keywords_en 只写英文关键词短语，不要中文，不要解释\n"
+            "3) 尽量包含：国家/地区英文名 + 时期英文名 + 历史/风格词（ancient/medieval/traditional/architecture等）\n"
+            "4) 若信息不足，也输出通用词\n\n"
+            f"category={category}\n"
+            f"genre={genre}\n"
+            f"region(中文)={region}\n"
+            f"period(中文)={period}\n"
+            f"era(中文)={era}\n"
+        )
+
+        tracer.emit("search_constraints_translate_start", region=region, period=period, era=era)
+        out = self.llm.json_generate(
+            system="只输出JSON。",
+            user=user,
+            schema_hint=SEARCH_KW_SCHEMA,
+            tracer=tracer,
+            step="search_constraints_translate",
+        )
+        kw = str(out.get("keywords_en") or "").strip()
+        tracer.emit("search_constraints_translate_done", keywords_en=kw)
+        return kw
+
+    def _infer_era_profile(self, *, prompt: str, outline: dict[str, Any], tracer: Tracer) -> dict[str, Any]:
+        user = render_template(
+            self.era_profile_tpl,
+            {"prompt": prompt, "outline_json": json.dumps(outline, ensure_ascii=False)},
+        )
+        tracer.emit("era_profile_start")
+        out = self.llm.json_generate(
+            system="你是信息抽取器，只输出JSON。",
+            user=user,
+            schema_hint=ERA_PROFILE_SCHEMA,
+            tracer=tracer,
+            step="era_profile",
+        )
+        tracer.emit("era_profile_done", confidence=float(out.get("confidence") or 0.0))
+        return out
 
     def generate(
         self,
@@ -135,18 +224,32 @@ class Orchestrator:
 
         run_dir = os.path.join(self.settings.output_dir, series, f"ep_{episode}")
         tracer = Tracer(trace_path=os.path.join(run_dir, "trace.jsonl"))
-        tracer.emit("run_start", category=category, series=series, episode=episode, media_mode=media_mode, scenes=scenes, total_seconds=total_seconds)
+        tracer.emit(
+            "run_start",
+            category=category,
+            series=series,
+            episode=episode,
+            media_mode=media_mode,
+            scenes=scenes,
+            total_seconds=total_seconds,
+        )
 
         rules = series_rules or {}
         era_constraints = self._build_era_constraints_text(category=category, rules=rules)
         history_constraints = self._build_history_constraints_text(category=category, rules=rules)
+        search_keywords_en = self._translate_search_constraints(category=category, rules=rules, tracer=tracer)
 
-        tracer.emit("constraints_loaded", era=str(rules.get("era") or ""), history_mode=str(rules.get("history_mode") or "factual"))
+        tracer.emit(
+            "constraints_loaded",
+            region=str(rules.get("region") or ""),
+            period=str(rules.get("period") or ""),
+            era=str(rules.get("era") or ""),
+            search_keywords_en=search_keywords_en,
+            reuse_cooldown_scenes=int(rules.get("reuse_cooldown_scenes") or 2),
+        )
 
-        # safety on user prompt
         self._safety_check_with_judge(stage="user_prompt", text=prompt, tracer=tracer)
 
-        # Outline
         outline_user = render_template(
             self.outline_user_tpl,
             {
@@ -163,11 +266,19 @@ class Orchestrator:
             outline_user = "【系列总概述】\n" + series_overview.strip() + "\n\n" + outline_user
 
         tracer.emit("llm_outline_start")
-        outline = self.llm.json_generate(system=self.system_prompt, user=outline_user, schema_hint=OUTLINE_SCHEMA_HINT, tracer=tracer, step="outline")
+        outline = self.llm.json_generate(
+            system=self.system_prompt,
+            user=outline_user,
+            schema_hint=OUTLINE_SCHEMA_HINT,
+            tracer=tracer,
+            step="outline",
+        )
         tracer.emit("llm_outline_done")
         self._safety_check_with_judge(stage="outline", text=str(outline), tracer=tracer)
 
-        # Script
+        # new: infer era profile from outline+prompt (generic, not China-specific)
+        era_profile = self._infer_era_profile(prompt=prompt, outline=outline, tracer=tracer)
+
         script_user = render_template(
             self.script_user_tpl,
             {
@@ -181,7 +292,13 @@ class Orchestrator:
             },
         )
         tracer.emit("llm_script_start")
-        script = self.llm.json_generate(system=self.system_prompt, user=script_user, schema_hint=SCRIPT_SCHEMA_HINT, tracer=tracer, step="script")
+        script = self.llm.json_generate(
+            system=self.system_prompt,
+            user=script_user,
+            schema_hint=SCRIPT_SCHEMA_HINT,
+            tracer=tracer,
+            step="script",
+        )
         tracer.emit("llm_script_done")
         self._safety_check_with_judge(stage="script", text=str(script), tracer=tracer)
 
@@ -191,8 +308,8 @@ class Orchestrator:
         script["total_seconds"] = total_seconds
         if "scenes" not in script or not isinstance(script["scenes"], list) or len(script["scenes"]) == 0:
             raise ValueError("Invalid script: missing scenes.")
-
         script["scenes"] = script["scenes"][:scenes]
+
         while len(script["scenes"]) < scenes:
             script["scenes"].append(
                 {
@@ -203,13 +320,17 @@ class Orchestrator:
                     "media_type": "image",
                     "narration": "（补充镜头）",
                     "on_screen_text": "",
-                    "image_prompt": "竖屏，符合时代背景的过渡画面，柔和光影，电影感",
-                    "video_prompt": "竖屏，符合时代背景的过渡镜头，轻微镜头运动，电影感",
-                    "negative_prompt": "现代, 手机, 汽车, 自行车, 西装, 互联网, 高楼, 霓虹灯",
+                    "image_prompt": "竖屏，符合故事设定的过渡画面，电影感",
+                    "video_prompt": "竖屏，符合故事设定的过渡镜头，电影感",
+                    "negative_prompt": "modern, smartphone, car, bicycle, suit, internet, skyscraper, neon light",
                 }
             )
 
-        era_tag = str(rules.get("era") or "").strip()
+        # inject generic tags into prompts (not China-specific)
+        setting = (era_profile.get("setting") or {}) if isinstance(era_profile, dict) else {}
+        region_tag = str(setting.get("region") or "").strip()
+        era_tag = str(setting.get("era") or setting.get("period") or "").strip()
+        culture_tag = str(setting.get("culture_style") or "").strip()
 
         for i, sc in enumerate(script["scenes"], start=1):
             sc["id"] = i
@@ -218,7 +339,7 @@ class Orchestrator:
             sc["orientation"] = (sc.get("orientation") or "portrait").lower()
             sc["image_prompt"] = sc.get("image_prompt") or sc.get("video_prompt") or ""
             sc["video_prompt"] = sc.get("video_prompt") or sc.get("image_prompt") or ""
-            sc["negative_prompt"] = sc.get("negative_prompt") or "现代, 手机, 汽车, 自行车, 西装, 互联网, 高楼, 霓虹灯"
+            sc["negative_prompt"] = sc.get("negative_prompt") or "modern, smartphone, car, bicycle, suit, internet, skyscraper, neon light"
             try:
                 sc["seconds"] = int(sc.get("seconds", 15))
             except Exception:
@@ -226,11 +347,19 @@ class Orchestrator:
             if sc["seconds"] < 1:
                 sc["seconds"] = 1
 
+            tail = []
+            if region_tag:
+                tail.append(f"Region:{region_tag}")
             if era_tag:
-                sc["image_prompt"] += f"。时代：{era_tag}。服饰与器物必须符合该时代。"
-                sc["video_prompt"] += f"。时代：{era_tag}。服饰与器物必须符合该时代。"
+                tail.append(f"Era:{era_tag}")
+            if culture_tag:
+                tail.append(f"Culture:{culture_tag}")
+            if tail:
+                suffix = " ".join(tail)
+                sc["image_prompt"] += f" ({suffix})"
+                sc["video_prompt"] += f" ({suffix})"
 
-        # long-form allocation (10~40 soft, 5~60 hard)
+        # duration allocation
         soft_lo, soft_hi = 10, 40
         hard_lo, hard_hi = 5, 60
         secs_list = []
@@ -263,6 +392,7 @@ class Orchestrator:
         if not dry_run:
             from .render import render_media_video, export_final
             tracer.emit("render_start", run_dir=run_dir)
+
             assets, final_video_path = render_media_video(
                 run_dir=run_dir,
                 ffmpeg_bin=self.settings.ffmpeg_bin,
@@ -278,6 +408,12 @@ class Orchestrator:
                 tts_voice=self.settings.tts_voice,
                 reuse_min_score=reuse_min_score,
                 tracer=tracer,
+                external_media=self.external_media,
+                category=category,
+                # prefer inferred era_profile keywords if present, else old translation
+                search_keywords_en=" ".join(((era_profile.get("search_keywords_en") or {}).get("required_terms") or [])) if isinstance(era_profile, dict) else search_keywords_en,
+                reuse_cooldown_scenes=int(rules.get("reuse_cooldown_scenes") or 2),
+                ffprobe_bin="ffprobe",
             )
             tracer.emit("render_done", final_video_path=final_video_path)
 
@@ -300,7 +436,7 @@ class Orchestrator:
             user_prompt=prompt,
             outline=outline,
             script=script,
-            assets=assets,
+            assets={**assets, "era_profile": era_profile},
             final_video_path=final_video_path,
         )
 
@@ -312,6 +448,7 @@ class Orchestrator:
             "episode": episode,
             "category": category,
             "outline": outline,
+            "era_profile": era_profile,
             "script": script,
             "assets": assets,
             "final_video_path": final_video_path,

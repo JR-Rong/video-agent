@@ -16,7 +16,14 @@ class QwenVideoClips:
     DashScope wan video synthesis (async HTTP):
     POST {base}/services/aigc/video-generation/video-synthesis   with header X-DashScope-Async: enable
     GET  {base}/tasks/{task_id}
+
+    IMPORTANT:
+    - DashScope wan i2v/t2v duration constraints often are: 2~15 seconds (varies by model).
+      We implement auto-chunking when duration > 15.
     """
+
+    MAX_DURATION = 15
+    MIN_DURATION = 2
 
     def __init__(
         self,
@@ -28,6 +35,7 @@ class QwenVideoClips:
         timeout_sec: int = 120,
         poll_interval_sec: float = 15.0,
         poll_timeout_sec: int = 900,
+        ffmpeg_bin: str = "ffmpeg",
     ) -> None:
         if not api_key:
             raise RuntimeError("Missing DASHSCOPE_API_KEY for QwenVideoClips")
@@ -38,6 +46,7 @@ class QwenVideoClips:
         self.timeout = timeout_sec
         self.poll_interval = poll_interval_sec
         self.poll_timeout = poll_timeout_sec
+        self.ffmpeg_bin = ffmpeg_bin
 
     def _headers_async(self) -> dict[str, str]:
         return {
@@ -76,15 +85,80 @@ class QwenVideoClips:
             time.sleep(self.poll_interval)
         raise RuntimeError(f"Qwen task poll timeout. last={last}")
 
+    def _clamp_duration(self, duration: int) -> int:
+        d = int(duration)
+        if d < self.MIN_DURATION:
+            return self.MIN_DURATION
+        if d > self.MAX_DURATION:
+            return self.MAX_DURATION
+        return d
+
+    def _concat_mp4(self, clip_paths: list[str], out_path: str) -> str:
+        """
+        concat demuxer, re-encode not needed if same codec/container.
+        """
+        from pathlib import Path
+        import subprocess
+
+        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+        list_file = str(Path(out_path).with_suffix(".concat.txt"))
+        lines = []
+        for p in clip_paths:
+            ap = os.path.abspath(p).replace("'", "'\\''")
+            lines.append(f"file '{ap}'")
+        Path(list_file).write_text("\n".join(lines), encoding="utf-8")
+
+        cmd = [self.ffmpeg_bin, "-y", "-f", "concat", "-safe", "0", "-i", list_file, "-c", "copy", out_path]
+        p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        Path(list_file).unlink(missing_ok=True)
+        if p.returncode != 0:
+            raise RuntimeError(f"ffmpeg concat failed: {p.stdout}")
+        return out_path
+
     @retry(stop=stop_after_attempt(2), wait=wait_exponential(min=1, max=8), reraise=True)
-    def generate_text2video(self, *, prompt: str, out_path: str, size: str = "720*1280", duration: int = 5, negative_prompt: str | None = None, prompt_extend: bool = True) -> str:
+    def generate_text2video(
+        self,
+        *,
+        prompt: str,
+        out_path: str,
+        size: str = "720*1280",
+        duration: int = 5,
+        negative_prompt: str | None = None,
+        prompt_extend: bool = True,
+    ) -> str:
+        """
+        If duration > 15, auto chunk and concat.
+        """
+        duration = int(duration)
+        if duration > self.MAX_DURATION:
+            parts = []
+            remain = duration
+            idx = 1
+            while remain > 0:
+                d = min(self.MAX_DURATION, remain)
+                d = max(self.MIN_DURATION, d)
+                part_path = str(Path(out_path).with_suffix(f".part{idx:02d}.mp4"))
+                parts.append(
+                    self.generate_text2video(
+                        prompt=prompt,
+                        out_path=part_path,
+                        size=size,
+                        duration=d,
+                        negative_prompt=negative_prompt,
+                        prompt_extend=prompt_extend,
+                    )
+                )
+                remain -= d
+                idx += 1
+            return self._concat_mp4(parts, out_path)
+
         url = f"{self.base_url}/services/aigc/video-generation/video-synthesis"
         payload: dict[str, Any] = {
             "model": self.model_t2v,
             "input": {"prompt": prompt},
             "parameters": {
                 "size": size,
-                "duration": int(duration),
+                "duration": self._clamp_duration(duration),
                 "prompt_extend": bool(prompt_extend),
             },
         }
@@ -125,6 +199,34 @@ class QwenVideoClips:
         prompt_extend: bool = True,
         audio: bool | None = None,
     ) -> str:
+        """
+        If duration > 15, auto chunk and concat.
+        """
+        duration = int(duration)
+        if duration > self.MAX_DURATION:
+            parts = []
+            remain = duration
+            idx = 1
+            while remain > 0:
+                d = min(self.MAX_DURATION, remain)
+                d = max(self.MIN_DURATION, d)
+                part_path = str(Path(out_path).with_suffix(f".part{idx:02d}.mp4"))
+                parts.append(
+                    self.generate_image2video(
+                        prompt=prompt,
+                        image_path=image_path,
+                        out_path=part_path,
+                        resolution=resolution,
+                        duration=d,
+                        negative_prompt=negative_prompt,
+                        prompt_extend=prompt_extend,
+                        audio=audio,
+                    )
+                )
+                remain -= d
+                idx += 1
+            return self._concat_mp4(parts, out_path)
+
         url = f"{self.base_url}/services/aigc/video-generation/video-synthesis"
         img_url = self._encode_image_data_url(image_path)
         payload: dict[str, Any] = {
@@ -135,7 +237,7 @@ class QwenVideoClips:
             },
             "parameters": {
                 "resolution": resolution,
-                "duration": int(duration),
+                "duration": self._clamp_duration(duration),
                 "prompt_extend": bool(prompt_extend),
                 "shot_type": "single",
             },

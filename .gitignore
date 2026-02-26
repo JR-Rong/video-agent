@@ -5,7 +5,10 @@ dist/
 .args
 *.sqlite3
 data/output/*
+data/export/*
+data/media_library/*
 *.png
 *.txt
 *.mp3
 *.mp4
+*.jsonl
