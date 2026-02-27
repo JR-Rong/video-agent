@@ -46,7 +46,7 @@ function Ensure-Conda {
   }
 
   Write-Host "[1/7] Installing Miniconda..."
-  $miniUrl = "https://repo.anaconda.com/miniconda/Miniconda3-latest-Windows-x86_64.exe"
+  $miniUrl = "https://mirrors.tuna.tsinghua.edu.cn/anaconda/miniconda/Miniconda3-latest-Windows-x86_64.exe"
   $installer = Join-Path $env:TEMP "miniconda.exe"
   Invoke-WebRequest -Uri $miniUrl -OutFile $installer
 
