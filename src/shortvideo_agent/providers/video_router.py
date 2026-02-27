@@ -42,8 +42,6 @@ class VideoRouter:
         except KlingInsufficientBalance:
             if not self.fallback:
                 raise
-            # Kling 余额不足时 fallback Qwen
-            # 若有 reference_image_base64：我们需要落盘成图片给 qwen i2v
             ref_b64 = kwargs.pop("reference_image_base64", None)
             out_path = kwargs["out_path"]
             prompt = kwargs["prompt"]
@@ -55,11 +53,8 @@ class VideoRouter:
             if ref_b64:
                 import base64
                 from pathlib import Path
-                # ref_b64 是纯 base64（kling格式），qwen i2v 需要 dataURL 或本地文件
-                # 我们这里写到临时 png
                 tmp_img = str(Path(out_path).with_suffix(".ref.png"))
                 Path(tmp_img).write_bytes(base64.b64decode(ref_b64))
-                # qwen i2v 以 resolution 选择 720P/1080P
                 resolution = "1080P" if max(width, height) >= 1080 else "720P"
                 return self.fallback.generate_image2video(
                     prompt=prompt,
@@ -70,7 +65,6 @@ class VideoRouter:
                     negative_prompt=neg,
                 )
             else:
-                # text2video
                 size = f"{width}*{height}"
                 return self.fallback.generate_text2video(prompt=prompt, out_path=out_path, size=size, duration=seconds, negative_prompt=neg)
 
@@ -85,8 +79,10 @@ def build_video_generator(*, settings: Settings) -> Optional[VideoGenerator]:
         return None
 
     if provider == "kling":
-        kc = cfg.get("kling") or {}
-        base_url = settings.kling_base_url or kc.get("base_url") or "https://api-beijing.klingai.com"
+        kling_base_cfg = cfg.get("kling") or {}
+        kling_cfg = (vg.get("kling") or kling_base_cfg)  # allow both styles
+
+        base_url = settings.kling_base_url or kling_base_cfg.get("base_url") or "https://api-beijing.klingai.com"
         if not settings.kling_access_key or not settings.kling_secret_key:
             raise RuntimeError("Kling selected but missing KLING_ACCESS_KEY/KLING_SECRET_KEY in .env")
 
@@ -94,19 +90,42 @@ def build_video_generator(*, settings: Settings) -> Optional[VideoGenerator]:
             base_url=base_url,
             access_key=settings.kling_access_key,
             secret_key=settings.kling_secret_key,
-            model_name=kc.get("model_name") or "kling-v1",
-            mode=kc.get("mode") or "std",
-            sound=kc.get("sound") or "off",
-            watermark_enabled=bool(kc.get("watermark_enabled") or False),
-            timeout_sec=int(kc.get("timeout_sec") or 120),
-            poll_interval_sec=float(kc.get("poll_interval_sec") or 2.0),
-            poll_timeout_sec=int(kc.get("poll_timeout_sec") or 600),
+            model_name=kling_cfg.get("model_name") or "kling-v1",
+            mode=kling_cfg.get("mode") or "std",
+            sound=kling_cfg.get("sound") or "off",
+            watermark_enabled=bool(kling_cfg.get("watermark_enabled") or False),
+            timeout_sec=int(kling_cfg.get("timeout_sec") or 120),
+            poll_interval_sec=float(kling_cfg.get("poll_interval_sec") or 2.0),
+            poll_timeout_sec=int(kling_cfg.get("poll_timeout_sec") or 600),
         )
 
-        # qwen fallback if configured
+        # qwen fallback config
+        qfb = vg.get("qwen_fallback") or {}
+        qfb_enabled = bool(qfb.get("enabled", True))
         dash_key = os.getenv("DASHSCOPE_API_KEY", "") or ""
-        dash_base = os.getenv("DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/api/v1") or "https://dashscope.aliyuncs.com/api/v1"
-        qwen = QwenVideoClips(api_key=dash_key, base_url=dash_base) if dash_key else None
+        if not (qfb_enabled and dash_key):
+            return VideoRouter(primary=kling, fallback=None)
+
+        dash_base = str(qfb.get("base_url") or os.getenv("DASHSCOPE_BASE_URL", "") or "https://dashscope.aliyuncs.com/api/v1").strip()
+        model_t2v = str(qfb.get("model_t2v") or "wanx2.1-t2v-turbo")
+        model_i2v = str(qfb.get("model_i2v") or "wan2.6-i2v-flash")
+        timeout_sec = int(qfb.get("timeout_sec") or 120)
+        poll_interval_sec = float(qfb.get("poll_interval_sec") or 15.0)
+        poll_timeout_sec = int(qfb.get("poll_timeout_sec") or 900)
+        ffmpeg_bin = str(qfb.get("ffmpeg_bin") or settings.ffmpeg_bin or "ffmpeg")
+        max_duration = int(qfb.get("max_duration") or 15)
+
+        qwen = QwenVideoClips(
+            api_key=dash_key,
+            base_url=dash_base,
+            model_t2v=model_t2v,
+            model_i2v=model_i2v,
+            timeout_sec=timeout_sec,
+            poll_interval_sec=poll_interval_sec,
+            poll_timeout_sec=poll_timeout_sec,
+            ffmpeg_bin=ffmpeg_bin,
+            max_duration=max_duration,
+        )
 
         return VideoRouter(primary=kling, fallback=qwen)
 

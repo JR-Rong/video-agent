@@ -83,7 +83,6 @@ class Orchestrator:
         self.history_factual_md = load_text(os.path.join(settings.prompts_dir, "history_factual.md"))
         self.history_classical_tpl = load_text(os.path.join(settings.prompts_dir, "history_classical_translation.md"))
 
-        # new: era profile extraction
         self.era_profile_tpl = load_text(os.path.join(settings.prompts_dir, "era_profile.md"))
 
     def _safety_check_with_judge(self, *, stage: str, text: str, tracer: Tracer) -> None:
@@ -135,13 +134,7 @@ class Orchestrator:
             return render_template(self.history_classical_tpl, {"classical_text": classical_text})
         return self.history_factual_md
 
-    def _translate_search_constraints(
-        self,
-        *,
-        category: str,
-        rules: dict[str, Any],
-        tracer: Tracer,
-    ) -> str:
+    def _translate_search_constraints(self, *, category: str, rules: dict[str, Any], tracer: Tracer) -> str:
         region = str(rules.get("region") or "").strip()
         period = str(rules.get("period") or "").strip()
         era = str(rules.get("era") or "").strip()
@@ -155,7 +148,7 @@ class Orchestrator:
             "要求：\n"
             "1) 输出只包含一个JSON对象 {\"keywords_en\":\"...\"}\n"
             "2) keywords_en 只写英文关键词短语，不要中文，不要解释\n"
-            "3) 尽量包含：国家/地区英文名 + 时期英文名 + 历史/风格词（ancient/medieval/traditional/architecture等）\n"
+            "3) 尽量包含：国家/地区英文名 + 时期英文名 + 历史/风格词\n"
             "4) 若信息不足，也输出通用词\n\n"
             f"category={category}\n"
             f"genre={genre}\n"
@@ -237,14 +230,14 @@ class Orchestrator:
         rules = series_rules or {}
         era_constraints = self._build_era_constraints_text(category=category, rules=rules)
         history_constraints = self._build_history_constraints_text(category=category, rules=rules)
-        search_keywords_en = self._translate_search_constraints(category=category, rules=rules, tracer=tracer)
+        legacy_search_kw = self._translate_search_constraints(category=category, rules=rules, tracer=tracer)
 
         tracer.emit(
             "constraints_loaded",
             region=str(rules.get("region") or ""),
             period=str(rules.get("period") or ""),
             era=str(rules.get("era") or ""),
-            search_keywords_en=search_keywords_en,
+            search_keywords_en=legacy_search_kw,
             reuse_cooldown_scenes=int(rules.get("reuse_cooldown_scenes") or 2),
         )
 
@@ -276,7 +269,6 @@ class Orchestrator:
         tracer.emit("llm_outline_done")
         self._safety_check_with_judge(stage="outline", text=str(outline), tracer=tracer)
 
-        # new: infer era profile from outline+prompt (generic, not China-specific)
         era_profile = self._infer_era_profile(prompt=prompt, outline=outline, tracer=tracer)
 
         script_user = render_template(
@@ -326,10 +318,11 @@ class Orchestrator:
                 }
             )
 
-        # inject generic tags into prompts (not China-specific)
+        # inject tags (optional, for human readability)
         setting = (era_profile.get("setting") or {}) if isinstance(era_profile, dict) else {}
         region_tag = str(setting.get("region") or "").strip()
-        era_tag = str(setting.get("era") or setting.get("period") or "").strip()
+        era_tag = str(setting.get("era") or "").strip()
+        period_tag = str(setting.get("period") or "").strip()
         culture_tag = str(setting.get("culture_style") or "").strip()
 
         for i, sc in enumerate(script["scenes"], start=1):
@@ -352,6 +345,8 @@ class Orchestrator:
                 tail.append(f"Region:{region_tag}")
             if era_tag:
                 tail.append(f"Era:{era_tag}")
+            if period_tag:
+                tail.append(f"Period:{period_tag}")
             if culture_tag:
                 tail.append(f"Culture:{culture_tag}")
             if tail:
@@ -359,7 +354,7 @@ class Orchestrator:
                 sc["image_prompt"] += f" ({suffix})"
                 sc["video_prompt"] += f" ({suffix})"
 
-        # duration allocation
+        # duration allocation (keep your current strategy)
         soft_lo, soft_hi = 10, 40
         hard_lo, hard_hi = 5, 60
         secs_list = []
@@ -389,6 +384,12 @@ class Orchestrator:
         final_video_path: str | None = None
         export_dir: str | None = None
 
+        # build a string keyword for query usage
+        era_kw_required = []
+        if isinstance(era_profile, dict):
+            era_kw_required = ((era_profile.get("search_keywords_en") or {}).get("required_terms") or [])
+        era_kw_required_str = " ".join([str(x) for x in era_kw_required if str(x).strip()]).strip()
+
         if not dry_run:
             from .render import render_media_video, export_final
             tracer.emit("render_start", run_dir=run_dir)
@@ -410,8 +411,8 @@ class Orchestrator:
                 tracer=tracer,
                 external_media=self.external_media,
                 category=category,
-                # prefer inferred era_profile keywords if present, else old translation
-                search_keywords_en=" ".join(((era_profile.get("search_keywords_en") or {}).get("required_terms") or [])) if isinstance(era_profile, dict) else search_keywords_en,
+                search_keywords_en=era_kw_required_str or legacy_search_kw,
+                era_profile=era_profile if isinstance(era_profile, dict) else None,
                 reuse_cooldown_scenes=int(rules.get("reuse_cooldown_scenes") or 2),
                 ffprobe_bin="ffprobe",
             )

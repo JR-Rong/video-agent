@@ -12,12 +12,19 @@ from ..utils.token_estimator import estimate_chat_tokens, TokenUsage
 def _must_be_pure_json_object(text: str) -> dict[str, Any]:
     t = (text or "").strip()
 
-    # 强要求：只允许一个 JSON object，不允许任何多余字符
-    if not (t.startswith("{") and t.endswith("}")):
-        raise ValueError(f"LLM output is not pure JSON object. head={t[:80]!r}")
+    # fast path: pure json object
+    if t.startswith("{") and t.endswith("}"):
+        return json.loads(t)
 
-    # 强要求：必须可解析
-    return json.loads(t)
+    # fallback: extract first {...} block (handles ```json ... ```)
+    i = t.find("{")
+    j = t.rfind("}")
+    if i >= 0 and j > i:
+        cand = t[i : j + 1].strip()
+        if cand.startswith("{") and cand.endswith("}"):
+            return json.loads(cand)
+
+    raise ValueError(f"LLM output is not pure JSON object. head={t[:80]!r}")
 
 
 class OpenAICompatChatLLM:

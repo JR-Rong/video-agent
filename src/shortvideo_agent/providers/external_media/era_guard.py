@@ -26,9 +26,9 @@ def _must_be_json_obj(text: str) -> dict[str, Any]:
 
 class OpenAICompatVisionJudge:
     """
-    Works for any OpenAI-compatible /chat/completions endpoint that supports:
-      messages[].content = [{"type":"text"...},{"type":"image_url"...}]
-    (DashScope compatible-mode VL models often support this too.)
+    OpenAI-compatible /chat/completions multimodal:
+      messages[].content = [{"type":"text"},{"type":"image_url"}]
+    Works for DashScope compatible-mode VL models too (if enabled on your account).
     """
 
     def __init__(self, *, base_url: str, api_key: str, model: str, timeout_sec: int = 60) -> None:
@@ -69,12 +69,7 @@ class OpenAICompatVisionJudge:
 
 
 class EraGuardRouter:
-    def __init__(
-        self,
-        *,
-        primary: Optional[OpenAICompatVisionJudge],
-        fallback: Optional[OpenAICompatVisionJudge],
-    ) -> None:
+    def __init__(self, *, primary: Optional[OpenAICompatVisionJudge], fallback: Optional[OpenAICompatVisionJudge]) -> None:
         self.primary = primary
         self.fallback = fallback
 

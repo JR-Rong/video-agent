@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import mimetypes
 import os
+import subprocess
 import time
 from pathlib import Path
 from typing import Any, Optional
@@ -17,13 +18,9 @@ class QwenVideoClips:
     POST {base}/services/aigc/video-generation/video-synthesis   with header X-DashScope-Async: enable
     GET  {base}/tasks/{task_id}
 
-    IMPORTANT:
-    - DashScope wan i2v/t2v duration constraints often are: 2~15 seconds (varies by model).
-      We implement auto-chunking when duration > 15.
+    duration constraints vary by model; default clamp is 2..max_duration.
+    We implement auto-chunking when duration > max_duration.
     """
-
-    MAX_DURATION = 15
-    MIN_DURATION = 2
 
     def __init__(
         self,
@@ -36,6 +33,8 @@ class QwenVideoClips:
         poll_interval_sec: float = 15.0,
         poll_timeout_sec: int = 900,
         ffmpeg_bin: str = "ffmpeg",
+        max_duration: int = 15,
+        min_duration: int = 2,
     ) -> None:
         if not api_key:
             raise RuntimeError("Missing DASHSCOPE_API_KEY for QwenVideoClips")
@@ -47,6 +46,8 @@ class QwenVideoClips:
         self.poll_interval = poll_interval_sec
         self.poll_timeout = poll_timeout_sec
         self.ffmpeg_bin = ffmpeg_bin
+        self.max_duration = int(max_duration)
+        self.min_duration = int(min_duration)
 
     def _headers_async(self) -> dict[str, str]:
         return {
@@ -87,21 +88,16 @@ class QwenVideoClips:
 
     def _clamp_duration(self, duration: int) -> int:
         d = int(duration)
-        if d < self.MIN_DURATION:
-            return self.MIN_DURATION
-        if d > self.MAX_DURATION:
-            return self.MAX_DURATION
+        if d < self.min_duration:
+            return self.min_duration
+        if d > self.max_duration:
+            return self.max_duration
         return d
 
     def _concat_mp4(self, clip_paths: list[str], out_path: str) -> str:
-        """
-        concat demuxer, re-encode not needed if same codec/container.
-        """
-        from pathlib import Path
-        import subprocess
-
         Path(out_path).parent.mkdir(parents=True, exist_ok=True)
         list_file = str(Path(out_path).with_suffix(".concat.txt"))
+
         lines = []
         for p in clip_paths:
             ap = os.path.abspath(p).replace("'", "'\\''")
@@ -126,17 +122,14 @@ class QwenVideoClips:
         negative_prompt: str | None = None,
         prompt_extend: bool = True,
     ) -> str:
-        """
-        If duration > 15, auto chunk and concat.
-        """
         duration = int(duration)
-        if duration > self.MAX_DURATION:
+        if duration > self.max_duration:
             parts = []
             remain = duration
             idx = 1
             while remain > 0:
-                d = min(self.MAX_DURATION, remain)
-                d = max(self.MIN_DURATION, d)
+                d = min(self.max_duration, remain)
+                d = max(self.min_duration, d)
                 part_path = str(Path(out_path).with_suffix(f".part{idx:02d}.mp4"))
                 parts.append(
                     self.generate_text2video(
@@ -199,17 +192,14 @@ class QwenVideoClips:
         prompt_extend: bool = True,
         audio: bool | None = None,
     ) -> str:
-        """
-        If duration > 15, auto chunk and concat.
-        """
         duration = int(duration)
-        if duration > self.MAX_DURATION:
+        if duration > self.max_duration:
             parts = []
             remain = duration
             idx = 1
             while remain > 0:
-                d = min(self.MAX_DURATION, remain)
-                d = max(self.MIN_DURATION, d)
+                d = min(self.max_duration, remain)
+                d = max(self.min_duration, d)
                 part_path = str(Path(out_path).with_suffix(f".part{idx:02d}.mp4"))
                 parts.append(
                     self.generate_image2video(

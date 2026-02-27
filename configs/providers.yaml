@@ -9,40 +9,75 @@ qwen:
   base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
   model: "qwen-plus"
 
+# =========================
+# Image generation
+# =========================
 image_generation:
-  provider: "kling"
-  default_size: "1k"
-  default_aspect_ratio: "9:16"
-  key_resolution: "2k"
-  model_name: "kling-v2-1"
-  watermark_enabled: false
+  provider: "kling"                 # kling|qwen|openai
   allow_openai_fallback: false
 
+  kling:
+    model_name: "kling-v2-1"
+    default_size: "1k"
+    key_resolution: "2k"
+    default_aspect_ratio: "9:16"
+    watermark_enabled: false
+
+  qwen:
+    model: "qwen-image-max"
+    base_url: "https://dashscope.aliyuncs.com/api/v1"
+    timeout_sec: 120
+
+  openai:
+    model: "gpt-image-1"
+    default_size: "1024x1024"
+
+# =========================
+# Video generation
+# =========================
 video_generation:
-  provider: "kling"
+  provider: "kling"                 # kling|none
+
   default:
     width: 720
     height: 1280
     fps: 24
+
   key_shot:
     width: 1080
     height: 1920
     fps: 24
 
-kling:
-  base_url: "https://api-beijing.klingai.com"
-  model_name: "kling-v2-6"
-  mode: "std"
-  sound: "off"
-  watermark_enabled: false
-  timeout_sec: 120
-  poll_interval_sec: 2.0
-  poll_timeout_sec: 600
+  kling:
+    model_name: "kling-v2-6"
+    mode: "std"
+    sound: "off"
+    watermark_enabled: false
+    timeout_sec: 120
+    poll_interval_sec: 2.0
+    poll_timeout_sec: 600
 
+  qwen_fallback:
+    enabled: true
+    base_url: "https://dashscope.aliyuncs.com/api/v1"
+    timeout_sec: 120
+    poll_interval_sec: 15.0
+    poll_timeout_sec: 900
+    model_t2v: "wanx2.1-t2v-turbo"
+    model_i2v: "wan2.6-i2v"
+    ffmpeg_bin: "ffmpeg"
+    max_duration: 15
+
+# =========================
+# Kling account costs display
+# =========================
 kling_costs:
   lookback_days: 30
   resource_pack_name: ""
 
+# =========================
+# External media search
+# =========================
 external_search:
   enabled: true
   providers: ["pexels", "pixabay", "archive"]
@@ -78,22 +113,24 @@ external_search:
     - gun
     - rifle
 
+  # same material must be separated by N scenes
+  reuse_cooldown_scenes: 2
+
   era_guard:
     enabled: true
-    provider: "qwen_compat"      # qwen_compat | openai_compat | off
+    provider: "qwen_compat"          # qwen_compat|openai_compat|off
     fallback_provider: "openai_compat"
-
-    # --- Qwen (DashScope compatible-mode vision) ---
-    qwen_base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    qwen_model: "qwen-vl-plus"   # 你可改成你账号可用的 VL 模型
     timeout_sec: 60
 
-    # --- OpenAI fallback (only if qwen fails / not configured) ---
-    openai_base_url: ""          # 可空：用 OPENAI_BASE_URL
-    openai_model: "gpt-4o-mini"  # 需要支持图片输入
-    # openai key 从 OPENAI_API_KEY 取
+    qwen_base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    qwen_model: "qwen-image-plus-2026-01-09"
 
-    allowed_people_hint: ""      # 由 era_profile 来填也可以；留空也行
+    # If you want to use official OpenAI with this http client,
+    # set OPENAI_BASE_URL=https://api.openai.com/v1 in .env
+    openai_base_url: ""
+    openai_model: "gpt-4o-mini"
+
+    allowed_people_hint: ""
     hard_block_objects:
       - "electric scooter"
       - "motorcycle"
@@ -103,4 +140,11 @@ external_search:
       - "smartphone"
       - "modern clothing"
 
-  reuse_cooldown_scenes: 2
+# =========================
+# Kling base (used by both image/video kling clients)
+# =========================
+kling:
+  base_url: "https://api-beijing.klingai.com"
+  timeout_sec: 120
+  poll_interval_sec: 2.0
+  poll_timeout_sec: 600

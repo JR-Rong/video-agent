@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import requests
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -12,10 +12,17 @@ class QwenImages:
     """
     Qwen-Image sync HTTP:
     POST {base}/services/aigc/multimodal-generation/generation
-    base: https://dashscope.aliyuncs.com/api/v1  (Beijing)
+    base: https://dashscope.aliyuncs.com/api/v1
     """
 
-    def __init__(self, *, api_key: str, base_url: str = "https://dashscope.aliyuncs.com/api/v1", model: str = "qwen-image-plus", timeout_sec: int = 120) -> None:
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        base_url: str = "https://dashscope.aliyuncs.com/api/v1",
+        model: str = "qwen-image-plus",
+        timeout_sec: int = 120,
+    ) -> None:
         if not api_key:
             raise RuntimeError("Missing DASHSCOPE_API_KEY for QwenImages")
         self.api_key = api_key
@@ -33,7 +40,7 @@ class QwenImages:
         prompt: str,
         out_path: str,
         negative_prompt: str | None = None,
-        size: str = "928*1664",  # 9:16
+        size: str = "928*1664",
         prompt_extend: bool = True,
         watermark: bool = False,
     ) -> str:
@@ -64,13 +71,11 @@ class QwenImages:
             raise RuntimeError(f"Qwen image HTTP {r.status_code}: {r.text}")
 
         data = r.json()
-        # sync interface returns image url in output.choices[0].message.content[0].image
         try:
             img_url = data["output"]["choices"][0]["message"]["content"][0]["image"]
         except Exception:
             raise RuntimeError(f"Qwen image response parse failed: {data}")
 
-        # download
         resp = requests.get(img_url, timeout=self.timeout)
         resp.raise_for_status()
         Path(out_path).write_bytes(resp.content)

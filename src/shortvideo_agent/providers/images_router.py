@@ -10,7 +10,6 @@ from ..utils.tracing import Tracer
 from .images_openai import OpenAIImages
 from .images_kling import KlingImages
 from .images_qwen import QwenImages
-from .video_clips_kling import KlingInsufficientBalance
 
 
 class ImagesRouter:
@@ -48,12 +47,13 @@ class ImagesRouter:
         ig = self.cfg.get("image_generation") or {}
         allow_openai_fallback = bool(ig.get("allow_openai_fallback", False))
 
-        kling_model = ig.get("model_name") or "kling-v2-1"
-        kling_resolution = ig.get("default_size") or "1k"
+        kling_cfg = ig.get("kling") or {}
+        kling_model = kling_cfg.get("model_name") or "kling-v2-1"
+        kling_resolution = kling_cfg.get("default_size") or "1k"
         if (importance or "").lower() == "key":
-            kling_resolution = ig.get("key_resolution") or kling_resolution
-        kling_aspect = ig.get("default_aspect_ratio") or ("9:16" if orientation == "portrait" else "16:9")
-        watermark_enabled = bool(ig.get("watermark_enabled") or False)
+            kling_resolution = kling_cfg.get("key_resolution") or kling_resolution
+        kling_aspect = kling_cfg.get("default_aspect_ratio") or ("9:16" if orientation == "portrait" else "16:9")
+        watermark_enabled = bool(kling_cfg.get("watermark_enabled") or False)
 
         # 1) Kling
         if self.provider == "kling":
@@ -79,7 +79,7 @@ class ImagesRouter:
             except Exception as e:
                 if tracer:
                     tracer.emit("image_fail", step=step, provider="kling", elapsed_ms=int((time.time()-t0)*1000), error=str(e), scene_id=scene_id)
-                # kling balance not enough or other errors -> fallback
+                # fallback to qwen/openai
                 pass
 
         # 2) Qwen
@@ -130,29 +130,36 @@ def build_images(*, settings: Settings) -> Any:
 
     kling_images = None
     if settings.kling_access_key and settings.kling_secret_key:
-        kling_cfg = cfg.get("kling") or {}
-        base_url = settings.kling_base_url or kling_cfg.get("base_url") or "https://api-beijing.klingai.com"
+        kling_base_cfg = (cfg.get("kling") or {})
+        base_url = settings.kling_base_url or kling_base_cfg.get("base_url") or "https://api-beijing.klingai.com"
+
+        kling_cfg = ig.get("kling") or {}
         kling_images = KlingImages(
             base_url=base_url,
             access_key=settings.kling_access_key,
             secret_key=settings.kling_secret_key,
-            model_name=(ig.get("model_name") or "kling-v1"),
-            watermark_enabled=bool(ig.get("watermark_enabled") or False),
-            timeout_sec=int((kling_cfg.get("timeout_sec") or 120)),
-            poll_interval_sec=float((kling_cfg.get("poll_interval_sec") or 2.0)),
-            poll_timeout_sec=int((kling_cfg.get("poll_timeout_sec") or 300)),
+            model_name=(kling_cfg.get("model_name") or "kling-v1"),
+            watermark_enabled=bool(kling_cfg.get("watermark_enabled") or False),
+            timeout_sec=int((kling_base_cfg.get("timeout_sec") or 120)),
+            poll_interval_sec=float((kling_base_cfg.get("poll_interval_sec") or 2.0)),
+            poll_timeout_sec=int((kling_base_cfg.get("poll_timeout_sec") or 300)),
         )
 
+    # qwen images (from cfg, not hard-coded)
     qwen_images = None
+    qwen_cfg = ig.get("qwen") or {}
     dash_key = os.getenv("DASHSCOPE_API_KEY", "") or ""
-    dash_base = os.getenv("DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/api/v1") or "https://dashscope.aliyuncs.com/api/v1"
+    dash_base = (qwen_cfg.get("base_url") or os.getenv("DASHSCOPE_BASE_URL", "") or "https://dashscope.aliyuncs.com/api/v1").strip()
+    qwen_model = str(qwen_cfg.get("model") or "qwen-image-plus")
+    qwen_timeout = int(qwen_cfg.get("timeout_sec") or 120)
+
     if dash_key:
-        from .images_qwen import QwenImages
-        qwen_images = QwenImages(api_key=dash_key, base_url=dash_base, model="qwen-image-plus")
+        qwen_images = QwenImages(api_key=dash_key, base_url=dash_base, model=qwen_model, timeout_sec=qwen_timeout)
 
     openai_images = None
+    openai_cfg = ig.get("openai") or {}
     if settings.openai_api_key:
-        from .images_openai import OpenAIImages
-        openai_images = OpenAIImages(api_key=settings.openai_api_key, base_url=settings.openai_base_url, model=settings.openai_image_model or "gpt-image-1")
+        openai_model = str(openai_cfg.get("model") or settings.openai_image_model or "gpt-image-1")
+        openai_images = OpenAIImages(api_key=settings.openai_api_key, base_url=settings.openai_base_url, model=openai_model)
 
     return ImagesRouter(provider=provider, kling_images=kling_images, qwen_images=qwen_images, openai_images=openai_images, cfg=cfg)
